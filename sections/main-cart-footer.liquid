@@ -93,7 +93,10 @@
                   {{ 'sections.cart.checkout' | t }}
                 </button>
               </div>
-              <p>test</p>
+              <p class="cart-attribute__field">
+                <label for="">備考</label>
+                <input required class="required" id="" type="text" name="attributes[備考]" value="{{ cart.attributes["備考"] }}">
+              </p>
 
               {%- if additional_checkout_buttons -%}
                 <div class="cart__dynamic-checkout-buttons additional-checkout-buttons">
