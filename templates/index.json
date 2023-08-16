@@ -66,17 +66,10 @@
         "padding_top": 44,
         "padding_bottom": 36
       }
-    },
-    "7eca5b27-c0fd-4503-a652-ee4d68cdb57d": {
-      "type": "sample",
-      "settings": {
-        "text-input": "サンプルテキストです"
-      }
     }
   },
   "order": [
     "image_banner",
-    "featured_collection",
-    "7eca5b27-c0fd-4503-a652-ee4d68cdb57d"
+    "featured_collection"
   ]
 }
