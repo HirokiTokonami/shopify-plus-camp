@@ -1,0 +1,20 @@
+<h2>{{ section.settings.text-input | escape }}</h2>
+
+{% schema %}
+  {
+    "name": "テキスト入力ボックス",
+    "settings": [
+      {
+        "type": "text",
+        "id": "text-input",
+        "label": "テキスト入力",
+        "default": "ここにテキストを入力してください"
+      }
+    ],
+    "presets": [
+      {
+        "name": "サンプルセクション"
+      }
+    ]
+  }
+{% endschema %}
