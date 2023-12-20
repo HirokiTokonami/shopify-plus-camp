@@ -1,0 +1,209 @@
+{%- comment -%}
+  DO NOT EDIT.
+  ANY UPDATE WILL BE OVERWRITTEN.
+{%- endcomment -%}
+
+{% assign settings = shop.metafields.mrpoint.settings.value.data %}
+{% if settings.enable_flg == 1 %}
+  {%- liquid
+    assign is_excluded = false
+    assign product_add_rate = 0
+    assign customer_add_rate = 0
+    assign plan_id = shop.metafields.mrpoint.settings.value.plan_id | minus: 0
+    assign total_spent = customer.total_spent | divided_by: 100
+    assign member_rank = "通常会員"
+
+    if template contains "product" and product.handle != blank
+      for tag in product.tags
+        if settings.excluded_item.type == "PRODUCT_TAG" and tag == settings.excluded_item.tag
+          assign is_excluded = true
+          break
+        endif
+
+        for product_rate in settings.product_rates
+          if tag == product_rate.tag
+            assign product_add_rate = product_rate.rate
+            break
+          endif
+        endfor
+      endfor
+
+      for collection in product.collections
+        assign collection_id_str = collection.id | append: ''
+        if settings.excluded_item.type == "COLLECTION" and collection_id_str == settings.excluded_item.collection_id
+          assign is_excluded = true
+          break
+        endif
+      endfor
+    endif
+
+    if customer.id != blank
+      for customer_rank in settings.customer_ranks
+        for tag in customer.tags
+          if tag == customer_rank.tag
+            assign customer_add_rate = customer_rank.rate
+            assign matched_by_tag = true
+            assign member_rank = customer_rank.tag
+          endif
+        endfor
+
+        if matched_by_tag == true
+          break
+        endif
+
+        assign min_value = customer_rank.min_value | minus: 0
+        if plan_id != 2 and total_spent >= min_value
+          assign customer_add_rate = customer_rank.rate
+          assign member_rank = customer_rank.tag
+        endif
+      endfor
+    endif
+  -%}
+
+  <script>
+    class MrpointPointCore {
+      constructor () {
+        this.isExcluded = "{{ is_excluded }}" === "true" ? true : false;
+        this.settings = {{ settings | json }};
+        this.taxIncluded = "{{ cart.taxes_included }}" === "true" ? true : false;
+        this.taxRate = {{ shop.metafields.mrpoint.settings.value.tax_rate | minus: 0 }};
+        this.basePointRate = {{ settings.per_point | minus: 0 }};
+        this.productAddRate = {{ product_add_rate | minus: 0 }};
+        this.customerAddRate = {{ customer_add_rate | minus: 0 }};
+        this.pointRate = this.isExcluded ? 0 : this.basePointRate + this.productAddRate + this.customerAddRate;
+        this.memberRank = "{{ member_rank }}";
+
+        // Show award point in product page
+        {% if template contains "product" and product.handle != blank %}
+          this.awardPoints = Array.from(document.querySelectorAll("[data-mrpoint-award-point]"));
+          if (this.awardPoints.length > 0) {
+            this.initAwardPoint();
+          }
+        {% endif %}
+
+        {% if customer.id != blank %}
+          // Show member rank
+          this.memberRanks = Array.from(document.querySelectorAll("[data-mrpoint-member-rank]"));
+          if (this.memberRank && this.memberRanks.length > 0) {
+            this.initMemberRank();
+          }
+
+          // Show custmer point
+          this.myPoints = Array.from(document.querySelectorAll("[data-mrpoint-my-point]"));
+          if (this.myPoints.length > 0) {
+            this.initMyPoint();
+          }
+        {% endif %}
+      }
+
+      async initAwardPoint() {
+        var data = await this.getProductData();
+        if (Object.keys(data).length === 0) return;
+
+        var variants = data.product.variants;
+        this.variantPoint = this.getVariantPoint(variants);
+        this.setAwardPoint();
+      }
+
+      async getProductData () {
+        var data = {};
+        var handle = "{{ product.handle }}";
+        try {
+          var response = await fetch(`/products/${handle}.json`, { method: "GET" });
+          if (response.status !== 200) {
+            throw new Error('Failed to get product data');
+          };
+          data = await response.json();
+        } catch (err) {
+          console.error(err)
+        }
+
+        return data;
+      }
+
+      getVariantPoint (variants) {
+        var data = {};
+        variants.forEach((variant) => {
+          var price = Number(variant.price);
+          if (this.taxIncluded) {
+            price = Math.round(price/(1 + this.taxRate));
+          }
+          var point = Math.floor(price * (this.pointRate * 0.01));
+          data[variant.id] = point;
+        });
+        return data;
+      }
+
+      setAwardPoint (variantId = null) {
+        for (var i = 0; i < this.awardPoints.length; i++) {
+          var awardPoint = this.awardPoints[i];
+          var targetId = variantId ? variantId : awardPoint.dataset.variantId;
+          var awardPointValue = awardPoint.querySelector("[data-point-value]");
+          if (!targetId || !awardPointValue) continue;
+
+          var point = this.variantPoint[targetId];
+          awardPointValue.textContent = point;
+        }
+      }
+
+      initMemberRank () {
+        for (var i = 0; i < this.memberRanks.length; i++) {
+          var memberRank = this.memberRanks[i];
+          var memberRankValue = memberRank.querySelector("[data-member-rank-value]");
+          if (memberRankValue) {
+            memberRankValue.textContent = this.memberRank;
+          }
+          memberRank.setAttribute("data-member-rank", this.memberRank);
+        }
+      }
+
+      async initMyPoint () {
+        var myData = await this.getMyData();
+        if (Object.keys(myData).length === 0) return;
+
+        for (var i = 0; i < this.myPoints.length; i++) {
+          var myPoint = this.myPoints[i];
+          var myPointValue = myPoint.querySelector("[data-my-point-value]");
+          if (myPointValue) {
+            myPointValue.textContent = myData.point;
+          }
+        }
+      }
+
+      async getMyData () {
+        var data = {};
+        var customerId = "{{ customer.id }}";
+        var options = {
+          method: "POST",
+          body: JSON.stringify({ "customer_id": customerId }),
+          headers: {"Content-Type": "application/json; charset=utf-8"},
+        };
+        try {
+          var response = await fetch(`/apps/mrpoint/mydata`, options);
+          if (response.status !== 200) {
+            throw new Error('Failed to get mydata');
+          };
+          data = await response.json();
+        } catch (err) {
+          console.error(err)
+        }
+
+        return data;
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+      var mrpointPointCore = new MrpointPointCore();
+
+      // [Custom Event] Update Award Point in product page
+      {% if template contains "product" and product.handle != blank %}
+        document.addEventListener('mrpoint:update-award-point', function (e) {
+          var variantId = e.detail.variantId;
+          if (variantId) {
+            mrpointPointCore.setAwardPoint(variantId);
+          }
+        });
+      {% endif %}
+    });
+  </script>
+{% endif %}

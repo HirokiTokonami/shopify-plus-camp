@@ -1,0 +1,367 @@
+{% if customer and shop.metafields.mrpoint.settings.value.enable_flg == 1 %}
+  <div class="mrpoint ">
+    <form>
+      <div class="mrpoint-header">
+        <span class="mrpoint-title">現在の所持ポイント</span>
+      </div>
+      <div class="mrpoint-contents">
+        <div class="rank">
+          <label>現在の会員ランク</label>
+          <span class="rank-val">{{rank_name}}</span>
+        </div>
+        <div class="currentpoint">
+          <label>現在の所持ポイント</label>
+          <span class="currentpoint-val"></span>
+        </div>
+        <div class="usepoint">
+          <label class="">今回使用するポイント</label>
+          <span class="applypoint"></span>
+          <div class="error"></div>
+          <div class="usepoint-input"><input type="text" name="usepoint"></input>pt</div>
+          <button type="button" class="btn btn-usepoint" onClick="usePoint()">
+            使用する
+          </button>
+        </div>
+        <div class="desc">{% if cart.item_count == 0 %}ポイントは商品カートイン後にご利用いただけます。<br>{% endif %}ポイントを利用した購入金額は住所の入力画面で表示されます。</div>
+      </div>
+    </form>
+  </div>
+
+
+  <script>
+  (function() {
+    const mrpoint = document.querySelector('.mrpoint');
+    mrpoint.querySelector('.mrpoint-header').addEventListener('click', function () {
+        let clslist = mrpoint.classList;
+        clslist.contains("open") ?  clslist.remove("open") : openWidget();
+    });
+  }());
+
+  // 表示初期化
+  history.replaceState(null, document.getElementsByTagName('title')[0].innerHTML, null);
+  window.addEventListener('popstate', function(e) {
+    document.querySelector('.mrpoint').classList.remove("open");
+    document.querySelector('.mrpoint').classList.remove("load");
+    document.querySelector('.mrpoint .usepoint').classList.remove("apply");
+  });
+
+  function openWidget() {
+    document.querySelector('.mrpoint').classList.add("open");
+    document.querySelector('.mrpoint').classList.add("load");
+
+    const customer_id = {{customer.id}}
+    const tags = [];
+    {% for tag in customer.tags %}
+      tags.push("{{tag}}");
+    {% endfor %}
+    var total_spent = 0;
+    {% if customer.total_spent %}
+      total_spent += {{customer.total_spent | money_without_currency | remove: ","}};
+    {% endif %}
+    {% if customer.metafields.mrpoint and customer.metafields.mrpoint.extra_spent %}
+      total_spent += {{customer.metafields.mrpoint.extra_spent}};
+    {% endif %}
+
+    // ajaxでPOST
+    commonajax(
+      "/apps/mrpoint/coupon_generate",
+      {secret_key:"{{shop.metafields.mrpoint.secret_proxy_key}}", customer_id: customer_id, tags: JSON.stringify(tags), total_spent: total_spent},
+      openWidget2,
+      {setid1:"field1",setid2:"field2"}
+    );
+  }
+
+  var openWidget2 = function(data, param){
+    if (data.err) {
+      if(data.err == "TIMEOUT") {
+        document.querySelector('.mrpoint .error').innerHTML = '接続エラー。ページを更新してください。';
+      } else {
+        document.querySelector('.mrpoint .error').innerHTML = data.err;
+      }
+    } else {
+      document.querySelector('.mrpoint').classList.remove("load");
+      document.querySelector('.mrpoint .currentpoint-val').innerHTML = data.point.toLocaleString() + 'pt';
+      document.querySelector('.mrpoint .rank-val').innerHTML = data.rank_name.toLocaleString();
+    }
+  };
+
+  function usePoint() {
+    // 見た目の変更
+    document.querySelector('.mrpoint .usepoint').classList.add("apply");
+    document.querySelector('.mrpoint').classList.add("load");
+
+    var usepoint = document.querySelector('.mrpoint input[name="usepoint"]').value;
+    var customer_id = {{customer.id}}
+
+    document.querySelector('.mrpoint .applypoint').innerHTML = usepoint.toLocaleString() + 'pt';
+    // ajaxでPOST
+    commonajax(
+      "/apps/mrpoint/coupon_generate",
+      {secret_key:"{{shop.metafields.mrpoint.secret_proxy_key}}", usepoint: usepoint, customer_id: customer_id},
+      setdata,
+      {setid1:"field1",setid2:"field2"}
+    );
+  }
+
+  var setdata = function(data, param){
+    if(data.err) {
+      document.querySelector('.mrpoint').classList.remove("load");
+      document.querySelector('.mrpoint .usepoint').classList.remove("apply");
+      if(data.err == "TIMEOUT") {
+        document.querySelector('.mrpoint .error').innerHTML = '接続エラー。再度お試しください。';
+      } else {
+        document.querySelector('.mrpoint .error').innerHTML = data.err;
+      }
+    } else {
+      var jsonAttrs = {};
+
+      // attributes（input）を取得
+      var cartInputAttrs = document.querySelectorAll('form[action="/cart"] input[name^="attributes["]');
+      if (!cartInputAttrs || cartInputAttrs.length == 0) {
+        cartInputAttrs = document.querySelectorAll('form.cart input[name^="attributes["]');
+      }
+      for (var cartAttr of cartInputAttrs) {
+        var prop = cartAttr.name.replace(/attributes[(.*?)]/g, '$1');
+        if (typeof cartAttr.value !== 'undefined' && cartAttr.value !== null && cartAttr.value != '') {
+          jsonAttrs[prop] = cartAttr.value;
+        }
+      }
+
+      // attributes（select）を取得
+      var cartSelectAttrs = document.querySelectorAll('form[action="/cart"] select[name^="attributes["]');
+      if (!cartSelectAttrs || cartSelectAttrs.length == 0) {
+        cartSelectAttrs = document.querySelectorAll('form.cart select[name^="attributes["]');
+      }
+      for (var cartAttr of cartSelectAttrs) {
+        var prop = cartAttr.name.replace(/attributes[(.*?)]/g, '$1');
+        if (cartAttr.selectedIndex >= 0 && cartAttr.options[cartAttr.selectedIndex].value != '') {
+          jsonAttrs[prop] = cartAttr.options[cartAttr.selectedIndex].value;
+        }
+      }
+
+      // ajaxでPOST
+      commonajax(
+        "/cart/update.js",
+        {attributes: jsonAttrs},
+        goCheckout,
+        {"usepoint": data.usepoint, "coupon_code":data.coupon_code}
+      );
+    }
+  };
+
+  //チェックアウト
+  var goCheckout = function(data, param){
+    if(data.err) {
+      document.querySelector('.mrpoint').classList.remove("load");
+      document.querySelector('.mrpoint .usepoint').classList.remove("apply");
+      if(data.err == "TIMEOUT") {
+        document.querySelector('.mrpoint .error').innerHTML = '接続エラー。再度お試しください。';
+      } else {
+        document.querySelector('.mrpoint .error').innerHTML = data.err;
+      }
+    } else {
+      document.querySelector('.mrpoint .applypoint').innerHTML = param.usepoint.toLocaleString() + 'pt';
+      // チェックアウトページへ遷移しつつ、クーポン使用
+      fetch('/discount/' + param.coupon_code).then((json)=>{location.href = '/checkout'}).catch((err) =>{});
+    }
+  };
+
+  //-----------------------------------------------
+  // jquery使わない式のajax
+  // @param url   リクエスト先
+  // @param requestJson リクエストデータ(json形式)
+  // @param callback 取得後実行処理
+  // @param cbparam 取得後実行処理に対する引数
+  //-----------------------------------------------
+  const commonajax = function(url, requestJson, callback, cbparam){
+    // タイムアウト設定
+    const controller = new AbortController();
+    const timeout = setTimeout(() => { controller.abort() }, 10000);
+
+    fetch(url,{
+      method : "POST",
+      body : JSON.stringify(requestJson),
+      headers: {"Content-Type": "application/json; charset=utf-8"},
+      signal: controller.signal
+    })
+    .then(function(res){
+      return res.json();
+    })
+    .then(function(data){
+      // 返されたデータ(json)
+      if(callback) callback(data, cbparam);
+    })
+    .catch(function(err){
+      // エラー処理
+      if (err.name == 'AbortError') {
+        if(callback) callback({"err":'TIMEOUT'}, null);
+      } else {
+        if(callback) callback({"err":'ERROR'}, null);
+      }
+    });
+  }
+
+  </script>
+
+  {% assign mrpoint_main_color = shop.metafields.mrpoint.settings.value.appearance.main_color %}
+  {% assign mrpoint_font_color = shop.metafields.mrpoint.settings.value.appearance.font_color %}
+
+  <style>
+  .mrpoint {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    background: #FFF;
+    max-width: 350px;
+    -webkit-filter:drop-shadow(3px 3px 3px rgba(0, 0, 0, 0.2));
+    -moz-filter:drop-shadow(3px 3px 3px rgba(0, 0, 0, 0.2));
+    -ms-filter:drop-shadow(3px 3px 3px rgba(0, 0, 0, 0.2));
+    filter:drop-shadow(3px 3px 3px rgba(0, 0, 0, 0.2));
+    border-radius: 10px;
+    overflow: hidden;
+    z-index: 99999;
+  }
+
+  .mrpoint.load:after {
+    content: "";
+    position: absolute;
+    margin: 0 auto;
+    background-color: #FFF;
+    background-image: url({{ 'mrpoint-loader.gif' | asset_url }});
+    width: 100%;
+    height: 100%;
+    background-size: 32px;
+    background-repeat: no-repeat;
+    background-position: center;
+    top: 0;
+    z-index: 1;
+    opacity: 0.5;
+  }
+
+  .mrpoint:not(.open) {
+    cursor: pointer;
+  }
+
+  .mrpoint .mrpoint-contents {
+    display: none;
+    padding: 20px;
+  }
+
+  .mrpoint.open .mrpoint-contents {
+    display: block;
+  }
+
+  .mrpoint-header {
+    background: {{mrpoint_main_color}};
+    padding: 10px;
+  }
+
+  .mrpoint-title {
+    padding: 10px;
+    color: {{mrpoint_font_color}};
+    font-size: 1.1em;
+    font-weight: bold;
+  }
+
+  .mrpoint.open .mrpoint-header:after {
+    display: block;
+    content: "×";
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    font-size: 26px;
+    color: #FFF;
+    height: 1em;
+    line-height: 1em;
+    cursor: pointer;
+  }
+
+  .mrpoint.open .mrpoint-contents label {
+    width: 170px;
+    display: inline-block;
+  }
+
+  .mrpoint-contents div {
+    margin-bottom: 20px;
+  }
+
+  .mrpoint .error {
+    font-size: 0.9em;
+    color: #CC3333;
+    margin-bottom: 3px;
+    font-weight: bold;
+  }
+
+  .mrpoint .usepoint input[type="text"] {
+    width: 300px;
+    max-width: 90%;
+    margin-right: 10px;
+    padding: 10px 12px;
+    background: #f4f4f4;
+    border: none;
+    font-size: 20px;
+    line-height: 1.6;
+    text-align: right;
+  }
+
+  .mrpoint .usepoint button[type="button"],
+  .mrpoint .usepoint button[type="button"]:hover {
+    color: {{mrpoint_font_color}};
+    background-color: {{mrpoint_main_color}};
+    width: 100%;
+    height: auto;
+    padding: 10px 30px;
+    border-radius: 2px;
+    font-weight: 700;
+    font-style: normal;
+    letter-spacing: .05em;
+    font-size: 16px;
+    border: none;
+  }
+
+  .mrpoint .usepoint button[type="button"]:hover {
+    opacity: 0.7;
+  }
+
+  .mrpoint .usepoint.apply {
+    padding: 10px;
+    border: 2px solid #CCC;
+  }
+
+  .mrpoint .usepoint.apply .usepoint-input {
+    display: none;
+  }
+
+  .mrpoint .usepoint .applypoint {
+    display: none;
+  }
+
+  .mrpoint .usepoint.apply .applypoint {
+    display: inline;
+    font-size: 26px;
+    font-weight: bold;
+  }
+
+  .mrpoint .usepoint.apply input[name="usepoint"] {
+    display: none;
+  }
+
+  .mrpoint .usepoint .uspoint-cancel {
+    opacity: 0.7;
+    font-size: 0.9em;
+    text-decoration: underline;
+  }
+
+  .mrpoint .desc {
+    font-size: 0.9em;
+  }
+
+  .mrpoint-contents div:last-child {
+    margin-bottom: 0;
+  }
+  .mrpoint button[disabled] {
+    opacity: 0.5;
+  }
+  </style>
+{% endif %}
+{% render "mrpoint-core" %}
